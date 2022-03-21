@@ -1,0 +1,203 @@
+#!/bin/bash
+
+# Dependencies:
+#   - OpenVPN: https://github.com/OpenVPN
+#   - Assumes you have your profiles saved to `$HOME/.vpncli/profiles/`
+
+# END
+
+# Global Variables
+VPN_CLI_PATH="$HOME/.vpncli"
+PROFILE_PATH="$VPN_CLI_PATH/profiles"
+
+# Usage Function
+usage() {
+cat <<EOF
+Usage:  $(basename "$0") [-h] [-d] [-s] [-l] [-p <PROFILE_NAME>]
+
+Where:  -h  show this help text
+        -d  disconnect from VPN
+        -s  show connected profile
+        -l  list profiles
+        -p  connect using the specified profile
+
+EOF
+}
+
+# Necessary tasks before options validation
+pre_tasks() {
+
+  # OpenVPN check
+  if [[ ! -x $(command -v openvpn) ]]; then
+    echo "OpenVPN is not installed."
+    echo "Please install this via your package manager and try again"
+    exit 1
+  fi
+
+  # Create necessary directories if they don't exist
+  if [[ ! -d "$VPN_CLI_PATH" ]]; then
+    mkdir -p "$VPN_CLI_PATH"
+  fi
+  if [[ ! -d $PROFILE_PATH ]]; then
+    mkdir -p "$PROFILE_PATH"
+  fi
+}
+
+# Show list of profiles in `$PROFILE_PATH`
+list_profiles() {
+  PROFILES=($(cd "$PROFILE_PATH"/ && find -- * -maxdepth 0 -type d -print0 | xargs -0))
+  if [ ${#PROFILES[@]} -eq 0 ]; then
+    echo "No profiles found"
+    exit 1
+  fi
+  echo "Profiles:"
+  for p in ${PROFILES[*]}; do
+    echo -e " $p"
+  done
+  exit 0
+}
+
+# Establish VPN Tunnel
+vpnconn() {
+
+  PROFILE="$1"
+  PROFILES=($(cd "$PROFILE_PATH"/ && find -- * -maxdepth 0 -type d -print0 | xargs -0))
+
+  # Check if there are any profiles 
+  if [ ${#PROFILES[@]} -eq 0 ]; then
+    echo "No profiles found in $PROFILE_PATH"
+    exit 1
+  fi
+
+  # Verify input is a valid profile
+  if [[ ! "${PROFILES[@]}" =~ "${PROFILE}" ]]; then
+    echo "$PROFILE does not match an existing profile."
+    echo "You can list valid profiles with option: -l"
+    exit 1
+  fi
+
+  # Don't allow new connection,
+  # if there is existing tunnel
+  if ip a | grep -q tun0; then
+    show_curr_profile "Active Tunnel"
+    echo "Please disconnect the existing tunnel"
+    exit 1
+  fi
+
+  # Different files for VPN tunnel
+  VPN_DIR="$PROFILE_PATH/$PROFILE"
+  OVPN_FILE="$(ls "$VPN_DIR" | grep ".*\.ovpn$")"
+  AUTH_FILE="$(ls "$VPN_DIR" | grep ".*\.auth$")"
+
+  # Check if both ovpn & auth files are present
+  if [ -z ${OVPN_FILE:+x} ] || [ -z ${AUTH_FILE:+x} ]; then
+    echo "OVPN or AUTH file was not found for $PROFILE"
+    exit 1
+  fi
+
+  sudo openvpn \
+    --config "$VPN_DIR/$OVPN_FILE" \
+    --auth-user-pass "$VPN_DIR/$AUTH_FILE" \
+    --verb 0 \
+    --daemon >> /dev/null
+  
+  echo "Connecting using profile: $PROFILE"
+
+  # Wait for Tunnel Creation
+  max_retries=3
+  while [ $max_retries -gt 0 ]
+  do
+    if ip a | grep -q tun0; then
+      break
+    fi
+    sleep 7
+    (( max_retries-- ))
+  done
+
+  # Validate Tunnel
+  if [ $max_retries -eq 0 ]; then
+    sudo killall openvpn
+    echo "Unable to conect to $PROFILE"
+    echo "Error log: /var/log/syslog"
+    exit 1
+  else
+    echo "Connected to $PROFILE"
+    exit 0
+  fi
+}
+
+# Kill all running openvpn process
+vpn_kill() {
+  if ip a | grep -q tun0; then
+    sudo killall openvpn
+    show_curr_profile "Disconnected"
+  else
+    echo "No VPN Tunnel found"
+  fi
+  exit 0
+}
+
+show_curr_profile() {
+  process="$(pgrep openvpn -a)"
+  if [ -z ${process:+x} ]; then
+    echo "Not connected to any profile"
+  else
+    curr_profile="${process##*profiles/}"
+    msg="$1"
+    echo "${msg:-Connected to}: ${curr_profile%%/*}"
+  fi
+}
+
+# Validate and execute function based on option
+validate_opt() {
+  pre_tasks
+  OPTION="$1"
+  case $OPTION in
+    -d)
+      vpn_kill
+      ;;
+    -p)
+      vpnconn "$2"
+      ;;
+    -l)
+      list_profiles
+      ;;
+    -s)
+      show_curr_profile
+      exit 0
+      ;;
+    -h)
+      usage
+      exit 0
+      ;;
+    *)
+     echo "Unknown Option: $OPTION"
+     usage 
+     exit 1
+  esac
+}
+
+# Validate arguments
+cli_args=($#)
+if [ $cli_args -eq 0 ]; then
+  usage 
+  exit 1
+elif [ $cli_args -eq 1 ] && [ ! $1 = '-p' ]; then
+  validate_opt $1
+else
+  # Check if -p option was passed 
+  if [ $1 = '-p' ]; then
+    # Ensure only one profile was supplied with for -p
+    if [ ! $cli_args -eq 2 ]; then
+      echo "-p requires one profile as argument"
+      usage
+      exit 1
+    else
+      validate_opt $1 $2
+    fi
+  else
+    echo "Only single option must be provided"
+    usage
+    exit 1
+  fi
+fi
