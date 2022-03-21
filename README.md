@@ -10,8 +10,8 @@ $ mkdir {{ profile }}
 
 
 Inside the profile directory, we should have two files.
-  - .ovpn config file
-  - {{ profile }}.auth (Must have username, password for ovpn authentication)
+  - `.ovpn` config file
+  - `{{ profile }}.auth` (Must have username, password for ovpn authentication)
 
 `$ chmod 600 $HOME/.vpncli/profiles/{{ profile }}/{{ profile }}.auth`
  
