@@ -19,7 +19,7 @@ Inside the profile directory, we should have two files.
 ## Usage
 ```bash
 $ vpncli -h
-Usage:  $(basename "$0") [-h] [-d] [-s] [-l] [-p <PROFILE_NAME>]
+Usage:  vpncli [-h] [-d] [-s] [-l] [-p <PROFILE_NAME>]
 
 Where:  -h  show this help text
         -d  disconnect from VPN
