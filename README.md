@@ -10,7 +10,7 @@ $ mkdir {{ profile }}
 ```
 
 
-Inside the profile directory, we should have two files.
+Inside the profile directory, there should be two files.
   - `.ovpn` config file
   - `{{ profile }}.auth` (Must have username, password for ovpn authentication)
 
